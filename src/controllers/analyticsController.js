@@ -1,7 +1,7 @@
 const Expense = require('../models/Expense');
 const Income = require('../models/Income');
 const Saving = require('../models/Saving');
-const Investment = require('../models/Investment');
+
 
 // Helper to get start and end dates of a month
 const getMonthRange = (year, month) => {
@@ -196,22 +196,21 @@ const getIncomeVsExpense = async (req, res, next) => {
 
     const { start: startOfMonth, end: endOfMonth } = getMonthRange(year, month);
 
-    const [exp, inc, sav, inv] = await Promise.all([
+    const [exp, inc, sav] = await Promise.all([
       Expense.find({ userId: req.user.id, expenseDate: { $gte: startOfMonth, $lte: endOfMonth } }),
       Income.find({ userId: req.user.id, incomeDate: { $gte: startOfMonth, $lte: endOfMonth } }),
       Saving.find({ userId: req.user.id, savingsDate: { $gte: startOfMonth, $lte: endOfMonth } }),
-      Investment.find({ userId: req.user.id }),
     ]);
 
     const totalExpense = exp.reduce((sum, item) => sum + item.amount, 0);
     const totalIncome = inc.reduce((sum, item) => sum + item.amount, 0);
-    const totalSavings = sav.reduce((sum, item) => sum + item.amount, 0);
-    const totalInvestments = inv.reduce((sum, item) => sum + (item.monthlyAmount || 0), 0);
+    const totalSavings = Math.max(0, totalIncome - totalExpense);
+    const totalInvestments = 0;
 
     const netCashflow = totalIncome - totalExpense;
     const expenseRatio = totalIncome > 0 ? Number(((totalExpense / totalIncome) * 100).toFixed(1)) : 0;
     const savingsRatio = totalIncome > 0 ? Number(((totalSavings / totalIncome) * 100).toFixed(1)) : 0;
-    const investmentRatio = totalIncome > 0 ? Number(((totalInvestments / totalIncome) * 100).toFixed(1)) : 0;
+    const investmentRatio = 0;
 
     // Itemized buckets for 50/30/20 breakdown
     const needsCategories = ['Bills', 'Food', 'Health', 'Transport', 'Education', 'Rent', 'Utilities', 'Groceries'];
@@ -326,15 +325,7 @@ const getIncomeVsExpense = async (req, res, next) => {
       });
     }
 
-    // 3. Investment Habit Insight
-    if (totalInvestments > 0) {
-      insights.push({
-        id: 'investment-active',
-        type: 'info',
-        title: 'Wealth Compounding Active',
-        description: `Monthly SIPs and investments of ${totalInvestments.toLocaleString()} are building long-term wealth.`,
-      });
-    }
+
 
     res.json({
       success: true,

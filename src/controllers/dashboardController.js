@@ -1,8 +1,9 @@
 const Expense = require('../models/Expense');
 const Income = require('../models/Income');
 const Saving = require('../models/Saving');
-const Investment = require('../models/Investment');
+
 const Budget = require('../models/Budget');
+const { ensureMonthlyBudgetExists } = require('./budgetController');
 
 // @desc    Get complete unified dashboard summary
 // @route   GET /api/dashboard/summary
@@ -12,6 +13,11 @@ const getDashboardSummary = async (req, res, next) => {
     const now = new Date();
     const month = req.query.month ? parseInt(req.query.month) : now.getMonth() + 1;
     const year = req.query.year ? parseInt(req.query.year) : now.getFullYear();
+
+    const userId = req.user.id;
+
+    // Ensure predefined budget exists for current or future months
+    await ensureMonthlyBudgetExists(userId, month, year);
 
     // Start & End of Month
     const startOfMonth = new Date(year, month - 1, 1, 0, 0, 0);
@@ -23,15 +29,13 @@ const getDashboardSummary = async (req, res, next) => {
     const endOfToday = new Date(now);
     endOfToday.setHours(23, 59, 59, 999);
 
-    const userId = req.user.id;
-
     // Fetch monthly records in parallel
     const [
       monthlyExpenses,
       todayExpenses,
       monthlyIncomes,
       monthlySavings,
-      allInvestments,
+
       monthlyBudgets,
       recentExpenses,
       recentIncomes,
@@ -40,7 +44,7 @@ const getDashboardSummary = async (req, res, next) => {
       Expense.find({ userId, expenseDate: { $gte: startOfToday, $lte: endOfToday } }),
       Income.find({ userId, incomeDate: { $gte: startOfMonth, $lte: endOfMonth } }),
       Saving.find({ userId, savingsDate: { $gte: startOfMonth, $lte: endOfMonth } }),
-      Investment.find({ userId }),
+
       Budget.find({ userId, month, year }),
       Expense.find({ userId }).sort({ expenseDate: -1 }).limit(5),
       Income.find({ userId }).sort({ incomeDate: -1 }).limit(5),
@@ -50,22 +54,14 @@ const getDashboardSummary = async (req, res, next) => {
     const totalExpenses = monthlyExpenses.reduce((sum, item) => sum + item.amount, 0);
     const todayTotalExpense = todayExpenses.reduce((sum, item) => sum + item.amount, 0);
     const totalIncome = monthlyIncomes.reduce((sum, item) => sum + item.amount, 0);
-    const totalSavings = monthlySavings.reduce((sum, item) => sum + item.amount, 0);
-
-    // Investment calculations
-    const totalInvestedPortfolio = allInvestments.reduce((sum, item) => sum + item.investedAmount, 0);
-    const currentPortfolioValue = allInvestments.reduce((sum, item) => sum + item.currentValue, 0);
-    const monthlyInvestmentAmount = allInvestments.reduce((sum, item) => sum + (item.monthlyAmount || 0), 0);
-    const totalProfitLoss = currentPortfolioValue - totalInvestedPortfolio;
-
-    // Net Available Balance
-    const availableBalance = totalIncome - totalExpenses - totalSavings;
+    // Net Available Balance & Salary-Based Savings
+    const totalSavings = totalIncome - totalExpenses;
+    const availableBalance = totalIncome - totalExpenses;
 
     // Ratios
     const savingsPercentage =
       totalIncome > 0 ? Number(((totalSavings / totalIncome) * 100).toFixed(1)) : 0;
-    const investmentPercentage =
-      totalIncome > 0 ? Number(((monthlyInvestmentAmount / totalIncome) * 100).toFixed(1)) : 0;
+
     const expensePercentage =
       totalIncome > 0 ? Number(((totalExpenses / totalIncome) * 100).toFixed(1)) : 0;
 
@@ -123,14 +119,12 @@ const getDashboardSummary = async (req, res, next) => {
         todayExpenseCount: todayExpenses.length,
         hasRecordedExpenseToday: todayExpenses.length > 0,
         savings: totalSavings,
-        investments: currentPortfolioValue,
-        monthlyInvestments: monthlyInvestmentAmount,
-        portfolioProfitLoss: totalProfitLoss,
+
         balance: availableBalance,
         expenseCount: monthlyExpenses.length,
         topCategory,
         savingsPercentage,
-        investmentPercentage,
+
         expensePercentage,
       },
       categoryBreakdown,

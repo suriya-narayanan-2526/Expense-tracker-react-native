@@ -1,6 +1,198 @@
 const Saving = require('../models/Saving');
+const Income = require('../models/Income');
+const Expense = require('../models/Expense');
+const Budget = require('../models/Budget');
+const { ensureMonthlyBudgetExists } = require('./budgetController');
 
-// @desc    Add savings entry
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+];
+
+const SHORT_MONTH_NAMES = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+];
+
+// @desc    Get complete savings dashboard (Salary - Spending calculation, monthly & yearly trends)
+// @route   GET /api/savings/dashboard
+// @access  Private
+const getSavingsDashboard = async (req, res, next) => {
+  try {
+    const now = new Date();
+    const month = req.query.month ? parseInt(req.query.month) : now.getMonth() + 1;
+    const year = req.query.year ? parseInt(req.query.year) : now.getFullYear();
+    const userId = req.user.id;
+
+    // Ensure budget is initialized for current/future months
+    await ensureMonthlyBudgetExists(userId, month, year);
+
+    // Query all records for user in parallel to ensure complete timezone-agnostic aggregation
+    const [allUserIncomes, allUserExpenses, allUserBudgets] = await Promise.all([
+      Income.find({ userId }).sort({ incomeDate: -1 }),
+      Expense.find({ userId }).sort({ expenseDate: -1 }),
+      Budget.find({ userId }),
+    ]);
+
+    // Filter for selected month & year (matching both local and UTC boundaries)
+    const monthIncomes = allUserIncomes.filter((inc) => {
+      const d = new Date(inc.incomeDate);
+      const incYear = d.getFullYear();
+      const incMonth = d.getMonth() + 1;
+      const utcYear = d.getUTCFullYear();
+      const utcMonth = d.getUTCMonth() + 1;
+      return (incYear === year && incMonth === month) || (utcYear === year && utcMonth === month);
+    });
+
+    const monthExpenses = allUserExpenses.filter((exp) => {
+      const d = new Date(exp.expenseDate);
+      const expYear = d.getFullYear();
+      const expMonth = d.getMonth() + 1;
+      const utcYear = d.getUTCFullYear();
+      const utcMonth = d.getUTCMonth() + 1;
+      return (expYear === year && expMonth === month) || (utcYear === year && utcMonth === month);
+    });
+
+    const monthBudgets = allUserBudgets.filter((b) => b.month === month && b.year === year);
+
+    // 1. Current Month Calculations
+    const salary = monthIncomes.reduce((sum, item) => sum + (item.amount || 0), 0);
+    const actualSpending = monthExpenses.reduce((sum, item) => sum + (item.amount || 0), 0);
+    const totalBudget = monthBudgets.reduce((sum, item) => sum + (item.monthlyLimit || 0), 0);
+
+    // Core rule: Savings = Salary - Actual Spending
+    const totalSavings = salary - actualSpending;
+    const savingsRate = salary > 0 ? Number(((totalSavings / salary) * 100).toFixed(1)) : 0;
+
+    // Budget Remaining: Budget - Actual Spending (0 if overspent)
+    const isOverBudget = actualSpending > totalBudget;
+    const budgetRemaining = Math.max(0, totalBudget - actualSpending);
+    const budgetOverspent = Math.max(0, actualSpending - totalBudget);
+
+    // 2. Monthly Trend (Months 1..12 for the requested year)
+    const monthlyTrend = [];
+    let yearlyTotalSalary = 0;
+    let yearlyTotalSpending = 0;
+    let yearlyTotalSavings = 0;
+
+    for (let m = 1; m <= 12; m++) {
+      const mIncomes = allUserIncomes.filter((inc) => {
+        const d = new Date(inc.incomeDate);
+        return (d.getFullYear() === year || d.getUTCFullYear() === year) &&
+               (d.getMonth() + 1 === m || d.getUTCMonth() + 1 === m);
+      });
+      const mExpenses = allUserExpenses.filter((exp) => {
+        const d = new Date(exp.expenseDate);
+        return (d.getFullYear() === year || d.getUTCFullYear() === year) &&
+               (d.getMonth() + 1 === m || d.getUTCMonth() + 1 === m);
+      });
+      const mBudgets = allUserBudgets.filter((b) => b.month === m && b.year === year);
+
+      const mSalary = mIncomes.reduce((sum, item) => sum + (item.amount || 0), 0);
+      const mSpending = mExpenses.reduce((sum, item) => sum + (item.amount || 0), 0);
+      const mBudget = mBudgets.reduce((sum, item) => sum + (item.monthlyLimit || 0), 0);
+      const mSavings = mSalary - mSpending;
+      const mRate = mSalary > 0 ? Number(((mSavings / mSalary) * 100).toFixed(1)) : 0;
+
+      yearlyTotalSalary += mSalary;
+      yearlyTotalSpending += mSpending;
+      yearlyTotalSavings += mSavings;
+
+      monthlyTrend.push({
+        month: m,
+        monthName: MONTH_NAMES[m - 1],
+        shortName: SHORT_MONTH_NAMES[m - 1],
+        salary: mSalary,
+        spending: mSpending,
+        budget: mBudget,
+        savings: mSavings,
+        savingsRate: mRate,
+        isOverBudget: mSpending > mBudget && mBudget > 0,
+      });
+    }
+
+    // 3. Multi-Year Historical Trend
+    const yearSet = new Set([year, year - 1, year - 2]);
+    allUserIncomes.forEach((inc) => {
+      yearSet.add(new Date(inc.incomeDate).getFullYear());
+      yearSet.add(new Date(inc.incomeDate).getUTCFullYear());
+    });
+    allUserExpenses.forEach((exp) => {
+      yearSet.add(new Date(exp.expenseDate).getFullYear());
+      yearSet.add(new Date(exp.expenseDate).getUTCFullYear());
+    });
+
+    const sortedYears = Array.from(yearSet).sort((a, b) => a - b);
+    const yearlyTrend = sortedYears.map((yr) => {
+      const yrIncomes = allUserIncomes.filter((inc) => {
+        const d = new Date(inc.incomeDate);
+        return d.getFullYear() === yr || d.getUTCFullYear() === yr;
+      });
+      const yrExpenses = allUserExpenses.filter((exp) => {
+        const d = new Date(exp.expenseDate);
+        return d.getFullYear() === yr || d.getUTCFullYear() === yr;
+      });
+
+      const yrSalary = yrIncomes.reduce((sum, item) => sum + (item.amount || 0), 0);
+      const yrSpending = yrExpenses.reduce((sum, item) => sum + (item.amount || 0), 0);
+      const yrSavings = yrSalary - yrSpending;
+      const yrRate = yrSalary > 0 ? Number(((yrSavings / yrSalary) * 100).toFixed(1)) : 0;
+
+      return {
+        year: yr,
+        totalSalary: yrSalary,
+        totalSpending: yrSpending,
+        totalSavings: yrSavings,
+        savingsRate: yrRate,
+      };
+    });
+
+    // 4. Return itemized incomes and expenses for the selected month
+    const itemizedIncomes = monthIncomes.map((inc) => ({
+      id: inc._id,
+      amount: inc.amount,
+      source: inc.source,
+      description: inc.description,
+      date: inc.incomeDate,
+    }));
+
+    const itemizedExpenses = monthExpenses.map((exp) => ({
+      id: exp._id,
+      amount: exp.amount,
+      category: exp.category,
+      description: exp.description,
+      paymentMethod: exp.paymentMethod,
+      date: exp.expenseDate,
+    }));
+
+    res.json({
+      success: true,
+      month,
+      year,
+      data: {
+        salary,
+        actualSpending,
+        totalBudget,
+        budgetRemaining,
+        isOverBudget,
+        budgetOverspent,
+        totalSavings,
+        savingsRate,
+        monthlyTrend,
+        yearlyTotalSalary,
+        yearlyTotalSpending,
+        yearlyTotalSavings,
+        yearlyTrend,
+        incomes: itemizedIncomes,
+        expenses: itemizedExpenses,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Add savings entry (manual goal deposit)
 // @route   POST /api/savings
 // @access  Private
 const addSaving = async (req, res, next) => {
@@ -171,6 +363,7 @@ const deleteSaving = async (req, res, next) => {
 };
 
 module.exports = {
+  getSavingsDashboard,
   addSaving,
   getSavings,
   getMonthlySavings,

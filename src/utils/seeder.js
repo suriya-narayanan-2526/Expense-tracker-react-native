@@ -4,7 +4,6 @@ const User = require('../models/User');
 const Expense = require('../models/Expense');
 const Income = require('../models/Income');
 const Saving = require('../models/Saving');
-const Investment = require('../models/Investment');
 const Budget = require('../models/Budget');
 
 dotenv.config();
@@ -21,7 +20,6 @@ const seedData = async () => {
     await Expense.deleteMany();
     await Income.deleteMany();
     await Saving.deleteMany();
-    await Investment.deleteMany();
     await Budget.deleteMany();
 
     console.log(' Cleared previous data...');
@@ -107,74 +105,33 @@ const seedData = async () => {
       },
     ]);
 
-    // 4. Create Investments
-    await Investment.create([
-      {
-        userId: demoUser._id,
-        type: 'Mutual Fund',
-        name: 'Parag Parikh Flexi Cap Fund',
-        investedAmount: 50000,
-        currentValue: 62500,
-        monthlyAmount: 5000,
-        investmentDate: new Date(currentYear, currentMonth - 2, 1),
-        description: 'SIP active every 5th',
-      },
-      {
-        userId: demoUser._id,
-        type: 'Stock',
-        name: 'Tata Consultancy Services (TCS)',
-        investedAmount: 30000,
-        currentValue: 34800,
-        investmentDate: new Date(currentYear, currentMonth - 3, 15),
-        description: 'Bluechip IT investment',
-      },
-      {
-        userId: demoUser._id,
-        type: 'Gold',
-        name: 'Sovereign Gold Bonds (SGB)',
-        investedAmount: 25000,
-        currentValue: 28900,
-        investmentDate: new Date(currentYear, currentMonth - 5, 10),
-        description: '2.5% Annual Interest + Capital Gains',
-      },
-      {
-        userId: demoUser._id,
-        type: 'FD',
-        name: 'HDFC High-Yield Fixed Deposit',
-        investedAmount: 40000,
-        currentValue: 42100,
-        investmentDate: new Date(currentYear, currentMonth - 6, 1),
-        description: '7.4% p.a. compounded quarterly',
-      },
-    ]);
-
-    // 5. Create Monthly Budgets
+    // 5. Create Monthly Budgets (Predefined default template)
     await Budget.create([
       {
         userId: demoUser._id,
-        category: 'Food',
-        monthlyLimit: 8000,
-        month: currentMonth,
-        year: currentYear,
-      },
-      {
-        userId: demoUser._id,
-        category: 'Shopping',
-        monthlyLimit: 5000,
+        category: 'Bills',
+        monthlyLimit: 300,
         month: currentMonth,
         year: currentYear,
       },
       {
         userId: demoUser._id,
         category: 'Transport',
-        monthlyLimit: 4000,
+        monthlyLimit: 500,
         month: currentMonth,
         year: currentYear,
       },
       {
         userId: demoUser._id,
-        category: 'Bills',
-        monthlyLimit: 6000,
+        category: 'Shopping',
+        monthlyLimit: 2500,
+        month: currentMonth,
+        year: currentYear,
+      },
+      {
+        userId: demoUser._id,
+        category: 'Food',
+        monthlyLimit: 1000,
         month: currentMonth,
         year: currentYear,
       },

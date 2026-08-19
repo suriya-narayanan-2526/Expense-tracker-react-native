@@ -16,7 +16,7 @@ const BudgetSchema = new mongoose.Schema(
     monthlyLimit: {
       type: Number,
       required: [true, 'Please provide a monthly spending limit'],
-      min: [1, 'Monthly limit must be greater than 0'],
+      min: [0, 'Monthly limit cannot be negative'],
     },
     month: {
       type: Number,
@@ -27,6 +27,10 @@ const BudgetSchema = new mongoose.Schema(
     year: {
       type: Number,
       required: true,
+    },
+    isCustomized: {
+      type: Boolean,
+      default: false,
     },
   },
   {

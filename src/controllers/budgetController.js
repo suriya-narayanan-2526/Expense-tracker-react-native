@@ -1,6 +1,47 @@
 const Budget = require('../models/Budget');
 const Expense = require('../models/Expense');
 
+// Predefined Monthly Budget Template
+const DEFAULT_BUDGET_TEMPLATE = [
+  { category: 'Bills', monthlyLimit: 300 },
+  { category: 'Transport', monthlyLimit: 500 },
+  { category: 'Shopping', monthlyLimit: 2500 },
+  { category: 'Food', monthlyLimit: 1000 },
+];
+
+// Helper to ensure predefined budget exists for current or future months
+const ensureMonthlyBudgetExists = async (userId, month, year) => {
+  const now = new Date();
+  const currentMonth = now.getMonth() + 1;
+  const currentYear = now.getFullYear();
+
+  const isCurrentOrFuture = year > currentYear || (year === currentYear && month >= currentMonth);
+  if (!isCurrentOrFuture) {
+    return;
+  }
+
+  const existingCount = await Budget.countDocuments({ userId, month, year });
+  if (existingCount === 0) {
+    const defaultEntries = DEFAULT_BUDGET_TEMPLATE.map((item) => ({
+      userId,
+      category: item.category,
+      monthlyLimit: item.monthlyLimit,
+      month,
+      year,
+      isCustomized: false,
+    }));
+
+    try {
+      await Budget.insertMany(defaultEntries, { ordered: false });
+    } catch (err) {
+      // Ignore duplicate key error in case of concurrent requests
+      if (err.code !== 11000 && !err.writeErrors) {
+        console.error('Error auto-creating default budget:', err);
+      }
+    }
+  }
+};
+
 // @desc    Create or update monthly category budget
 // @route   POST /api/budgets
 // @access  Private
@@ -8,10 +49,10 @@ const setBudget = async (req, res, next) => {
   try {
     const { category, monthlyLimit, month, year } = req.body;
 
-    if (!category || !monthlyLimit || isNaN(monthlyLimit) || Number(monthlyLimit) <= 0) {
+    if (!category || monthlyLimit === undefined || isNaN(monthlyLimit) || Number(monthlyLimit) < 0) {
       return res.status(400).json({
         success: false,
-        message: 'Please provide category and a valid positive monthly limit',
+        message: 'Please provide category and a valid non-negative monthly limit',
       });
     }
 
@@ -32,6 +73,7 @@ const setBudget = async (req, res, next) => {
         monthlyLimit: Number(monthlyLimit),
         month: bMonth,
         year: bYear,
+        isCustomized: true,
       },
       { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true }
     );
@@ -65,6 +107,9 @@ const getMonthlyBudgets = async (req, res, next) => {
     const now = new Date();
     const month = req.query.month ? parseInt(req.query.month) : now.getMonth() + 1;
     const year = req.query.year ? parseInt(req.query.year) : now.getFullYear();
+
+    // Auto-create predefined budget if current or future month has no budget records
+    await ensureMonthlyBudgetExists(req.user.id, month, year);
 
     const startOfMonth = new Date(year, month - 1, 1, 0, 0, 0);
     const endOfMonth = new Date(year, month, 0, 23, 59, 59, 999);
@@ -108,6 +153,7 @@ const getMonthlyBudgets = async (req, res, next) => {
         monthlyLimit: b.monthlyLimit,
         month: b.month,
         year: b.year,
+        isCustomized: b.isCustomized,
         spentAmount: spent,
         remainingAmount: remaining,
         usedPercentage,
@@ -150,10 +196,11 @@ const updateBudget = async (req, res, next) => {
 
     const { category, monthlyLimit, month, year } = req.body;
 
-    if (category) budget.category = category;
+    if (category) budget.category = category.trim();
     if (monthlyLimit !== undefined) budget.monthlyLimit = Number(monthlyLimit);
     if (month) budget.month = parseInt(month);
     if (year) budget.year = parseInt(year);
+    budget.isCustomized = true;
 
     await budget.save();
 
@@ -189,4 +236,6 @@ module.exports = {
   getMonthlyBudgets,
   updateBudget,
   deleteBudget,
+  DEFAULT_BUDGET_TEMPLATE,
+  ensureMonthlyBudgetExists,
 };
