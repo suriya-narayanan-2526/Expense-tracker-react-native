@@ -13,6 +13,10 @@ const addExpense = async (req, res, next) => {
       expenseDate,
       isRecurring,
       recurringRule,
+      source,
+      sender,
+      deduplicationKey,
+      currency,
     } = req.body;
 
     if (!amount || isNaN(amount) || Number(amount) <= 0) {
@@ -29,6 +33,23 @@ const addExpense = async (req, res, next) => {
       });
     }
 
+    // Deduplication check for bank SMS or client idempotency keys
+    if (deduplicationKey) {
+      const existingExpense = await Expense.findOne({
+        userId: req.user.id,
+        deduplicationKey,
+      });
+
+      if (existingExpense) {
+        return res.status(409).json({
+          success: false,
+          isDuplicate: true,
+          message: 'This expense transaction has already been recorded',
+          data: existingExpense,
+        });
+      }
+    }
+
     const expense = await Expense.create({
       userId: req.user.id,
       amount: Number(amount),
@@ -38,6 +59,10 @@ const addExpense = async (req, res, next) => {
       expenseDate: expenseDate ? new Date(expenseDate) : new Date(),
       isRecurring: !!isRecurring,
       recurringRule: recurringRule || '',
+      source: source || 'manual',
+      sender: sender || '',
+      deduplicationKey: deduplicationKey || undefined,
+      currency: currency || 'INR',
     });
 
     res.status(201).json({

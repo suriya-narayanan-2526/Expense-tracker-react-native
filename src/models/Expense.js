@@ -43,6 +43,25 @@ const ExpenseSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+    source: {
+      type: String,
+      enum: ['manual', 'bank_sms'],
+      default: 'manual',
+    },
+    sender: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    deduplicationKey: {
+      type: String,
+      sparse: true,
+      index: true,
+    },
+    currency: {
+      type: String,
+      default: 'INR',
+    },
   },
   {
     timestamps: true,
@@ -51,5 +70,9 @@ const ExpenseSchema = new mongoose.Schema(
 
 ExpenseSchema.index({ userId: 1, expenseDate: -1 });
 ExpenseSchema.index({ userId: 1, category: 1, expenseDate: -1 });
+ExpenseSchema.index(
+  { userId: 1, deduplicationKey: 1 },
+  { unique: true, partialFilterExpression: { deduplicationKey: { $type: 'string' } } }
+);
 
 module.exports = mongoose.model('Expense', ExpenseSchema);

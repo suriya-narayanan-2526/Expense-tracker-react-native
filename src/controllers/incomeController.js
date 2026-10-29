@@ -5,7 +5,16 @@ const Income = require('../models/Income');
 // @access  Private
 const addIncome = async (req, res, next) => {
   try {
-    const { amount, source, description, incomeDate, isRecurring } = req.body;
+    const {
+      amount,
+      source,
+      description,
+      incomeDate,
+      isRecurring,
+      sender,
+      deduplicationKey,
+      currency,
+    } = req.body;
 
     if (!amount || isNaN(amount) || Number(amount) <= 0) {
       return res.status(400).json({
@@ -14,13 +23,33 @@ const addIncome = async (req, res, next) => {
       });
     }
 
+    // Deduplication check for bank SMS or client idempotency keys
+    if (deduplicationKey) {
+      const existingIncome = await Income.findOne({
+        userId: req.user.id,
+        deduplicationKey,
+      });
+
+      if (existingIncome) {
+        return res.status(409).json({
+          success: false,
+          isDuplicate: true,
+          message: 'This income transaction has already been recorded',
+          data: existingIncome,
+        });
+      }
+    }
+
     const income = await Income.create({
       userId: req.user.id,
       amount: Number(amount),
-      source: source || 'Salary',
+      source: source || (sender ? 'Bank SMS' : 'Salary'),
       description: description || '',
       incomeDate: incomeDate ? new Date(incomeDate) : new Date(),
       isRecurring: !!isRecurring,
+      sender: sender || '',
+      deduplicationKey: deduplicationKey || undefined,
+      currency: currency || 'INR',
     });
 
     res.status(201).json({

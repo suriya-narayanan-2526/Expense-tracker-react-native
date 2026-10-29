@@ -34,6 +34,20 @@ const IncomeSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    sender: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    deduplicationKey: {
+      type: String,
+      sparse: true,
+      index: true,
+    },
+    currency: {
+      type: String,
+      default: 'INR',
+    },
   },
   {
     timestamps: true,
@@ -42,5 +56,9 @@ const IncomeSchema = new mongoose.Schema(
 
 IncomeSchema.index({ userId: 1, incomeDate: -1 });
 IncomeSchema.index({ userId: 1, source: 1, incomeDate: -1 });
+IncomeSchema.index(
+  { userId: 1, deduplicationKey: 1 },
+  { unique: true, partialFilterExpression: { deduplicationKey: { $type: 'string' } } }
+);
 
 module.exports = mongoose.model('Income', IncomeSchema);
